@@ -77,6 +77,10 @@ const SpotifyApi = (function () {
 		});
 	}
 
+	function getCurrentUser(accessToken) {
+		return request('/me', accessToken);
+	}
+
 	// --- Playlists ---
 
 	async function getAllPlaylists(accessToken) {
@@ -125,6 +129,7 @@ const SpotifyApi = (function () {
 
 	return {
 		SpotifyApiError,
+		getCurrentUser,
 		getCurrentlyPlaying,
 		play,
 		pause,

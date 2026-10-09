@@ -8,16 +8,19 @@
 	--radius-card: 10px;
 	--radius-art: 8px;
 
-	/* The player (art + track info + controls) is a fixed, constant size at every
-	   slot size — only the playlist panel grows to use extra space. These are plain
-	   px, not vmin: this widget only ever renders at 8 known Xeneon Edge resolutions,
-	   so there's no need for viewport-relative scaling here. */
+	/* The player (art + track info + controls) is a fixed, constant size whenever the
+	   playlist panel is also shown (M/L/XL) — only the playlist panel grows to use
+	   extra space there. At Small, where there's no playlist panel to share space
+	   with, these are overridden larger to fill the slot (see the max-height:450px
+	   block below). These are plain px, not vmin: this widget only ever renders at
+	   8 known Xeneon Edge resolutions, so there's no need for viewport-relative
+	   scaling here. */
 	--art-size: 110px;
 	--font-track: 20px;
 	--font-artist: 14px;
 	--font-label: 12px;
 	--font-title: 18px;
-	--font-body: 14px;
+	--font-body: 16px;
 	--ctrl-size: 38px;
 	--ctrl-icon: 17px;
 }
@@ -314,7 +317,7 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 9px 12px;
+	padding: 11px 14px;
 	border-radius: var(--radius-card);
 	background: rgba(255, 255, 255, 0.05);
 	border: 1.5px solid transparent;
@@ -331,6 +334,14 @@ body {
 }
 
 .playlist-row.is-checking {
+	opacity: 0.5;
+}
+
+.playlist-row.is-readonly {
+	cursor: default;
+}
+
+.playlist-row.is-readonly .playlist-name {
 	opacity: 0.5;
 }
 
@@ -395,6 +406,30 @@ body {
    every M/L/XL slot (H or V) is 696px+ tall while both S slots are under 420px. */
 @media (min-height: 451px) {
 	.playlists-area { display: flex; }
+}
+
+/* Small (S-H 840x344, S-V 696x416): no playlist panel to share space with, so the
+   player scales up to fill the slot instead of staying at the M/L/XL compact size. */
+@media (max-height: 450px) {
+	:root {
+		--art-size: 260px;
+		--font-track: 32px;
+		--font-artist: 20px;
+		--font-label: 15px;
+		--ctrl-size: 62px;
+		--ctrl-icon: 27px;
+	}
+
+	.player-area { gap: 24px; }
+
+	.player-details {
+		width: auto;
+		flex: 1 1 auto;
+		max-width: 420px;
+		gap: 14px;
+	}
+
+	.progress-track { height: 6px; }
 }
 
 /* ---------- Toast (diagnostic error messages) ---------- */

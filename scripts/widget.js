@@ -12,6 +12,7 @@ let likedState = null;
 let playlistsCache = null;
 let playlistsCacheAt = 0;
 let containmentState = {}; // playlistId -> true | false | 'checking'
+let currentUserId = null;
 let consecutiveErrors = 0;
 
 // --- iCUE property access (see references/html-template.md for rationale) ---
@@ -344,7 +345,17 @@ async function refreshPlaylistsAndContainment(accessToken) {
 	const now = Date.now();
 	if (!playlistsCache || now - playlistsCacheAt > PLAYLISTS_CACHE_MS) {
 		try {
+			if (!currentUserId) {
+				const me = await SpotifyApi.getCurrentUser(accessToken);
+				currentUserId = me.id;
+			}
+
 			const fetched = await SpotifyApi.getAllPlaylists(accessToken);
+			fetched.forEach(function (p) {
+				// Spotify returns 403 if you try to add/remove tracks on a playlist you
+				// don't own and isn't marked collaborative — only those are editable here.
+				p.isEditable = !!(p.collaborative || (p.owner && p.owner.id === currentUserId));
+			});
 			fetched.sort(function (a, b) {
 				return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
 			});
@@ -373,6 +384,7 @@ function renderPlaylistsList() {
 		const row = document.createElement('div');
 		row.className = 'playlist-row';
 		row.dataset.playlistId = playlist.id;
+		row.classList.toggle('is-readonly', !playlist.isEditable);
 
 		const name = document.createElement('div');
 		name.className = 'playlist-name';
@@ -383,7 +395,13 @@ function renderPlaylistsList() {
 
 		row.appendChild(name);
 		row.appendChild(check);
-		row.addEventListener('click', function () { togglePlaylistMembership(playlist.id); });
+		row.addEventListener('click', function () {
+			if (!playlist.isEditable) {
+				showToast('Can’t edit “' + playlist.name + '” — you don’t own it.');
+				return;
+			}
+			togglePlaylistMembership(playlist.id);
+		});
 		list.appendChild(row);
 
 		playlistRowEls[playlist.id] = row;
