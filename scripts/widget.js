@@ -191,9 +191,24 @@ function formatTime(ms) {
 	return m + ':' + (s < 10 ? '0' : '') + s;
 }
 
+const PREVIEW_POLL_INTERVAL_SEC = 25;
+
+function isIcuePreview() {
+	try { return typeof iCUE !== 'undefined' && iCUE.isPreview === true; } catch (e) { return false; }
+}
+
 function startPolling() {
 	if (pollTimer) clearInterval(pollTimer);
-	const intervalSec = clampRange(getIcueProperty('pollIntervalSec'), 2, 10, 3);
+	// iCUE's settings editor appears to render more than one live copy of the widget
+	// at once (e.g. the device-accurate preview and the widget-picker card), each
+	// running its own independent copy of this script — meaning the configured
+	// refresh interval gets hit that many times over purely from having the settings
+	// panel open, with no user interaction at all. Poll much less aggressively while
+	// in preview mode; on the real device there's only ever one instance, so the
+	// user's configured interval applies as normal there.
+	const intervalSec = isIcuePreview()
+		? PREVIEW_POLL_INTERVAL_SEC
+		: clampRange(getIcueProperty('pollIntervalSec'), 2, 10, 3);
 	pollNow();
 	pollTimer = setInterval(pollNow, intervalSec * 1000);
 }
