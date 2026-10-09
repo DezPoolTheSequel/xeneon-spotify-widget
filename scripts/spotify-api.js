@@ -12,8 +12,24 @@ const SpotifyApi = (function () {
 		}
 	}
 
+	// Shared circuit breaker across every call this module makes — including the
+	// regular "currently playing" poll, not just playlist actions. Cross-origin
+	// fetch() responses only expose a small safelist of headers to JavaScript, and
+	// Retry-After generally isn't one of them unless the server opts in via
+	// Access-Control-Expose-Headers, so the real wait time is often simply not
+	// readable here. Without this, the background poll (every few seconds) would
+	// keep hitting a blocked endpoint the entire time a human "waits it out",
+	// which can prevent a sustained block from ever actually clearing.
+	const RATE_LIMIT_FALLBACK_COOLDOWN_MS = 60 * 1000;
+	let rateLimitedUntil = 0;
+
 	async function request(path, accessToken, options) {
 		options = options || {};
+
+		if (Date.now() < rateLimitedUntil) {
+			const waitSec = Math.ceil((rateLimitedUntil - Date.now()) / 1000);
+			throw new SpotifyApiError('Rate limited by Spotify — pausing requests for ' + waitSec + 's.', 429);
+		}
 
 		const response = await fetch(BASE + path, {
 			method: options.method || 'GET',
@@ -24,17 +40,16 @@ const SpotifyApi = (function () {
 			body: options.body ? JSON.stringify(options.body) : undefined
 		});
 
-		// Fail fast on a 429 instead of silently retrying — during a sustained block
-		// (as opposed to a brief burst), each retry is itself another request against
-		// an already-exhausted quota, which can extend the block rather than ride it
-		// out. Surface Spotify's actual Retry-After value so it's clear whether this
-		// is a few seconds or much longer.
 		if (response.status === 429) {
 			const retryAfterSec = Number(response.headers.get('Retry-After'));
-			const waitMsg = Number.isFinite(retryAfterSec) && retryAfterSec > 0
-				? ('Rate limited by Spotify — try again in ' + retryAfterSec + 's.')
-				: 'Rate limited by Spotify — try again shortly.';
-			throw new SpotifyApiError(waitMsg, 429);
+			const cooldownMs = (Number.isFinite(retryAfterSec) && retryAfterSec > 0)
+				? retryAfterSec * 1000
+				: RATE_LIMIT_FALLBACK_COOLDOWN_MS;
+			rateLimitedUntil = Date.now() + cooldownMs;
+			throw new SpotifyApiError(
+				'Rate limited by Spotify — pausing all requests for ' + Math.ceil(cooldownMs / 1000) + 's.',
+				429
+			);
 		}
 
 		if (response.status === 204 || response.status === 202) return null;
