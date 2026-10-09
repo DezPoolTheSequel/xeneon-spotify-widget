@@ -263,7 +263,12 @@ async function updateTrackUI(data, accessToken) {
 		likedState = null;
 		containmentState = {};
 		refreshLikedState(accessToken);
-		refreshPlaylistsAndContainment(accessToken);
+		// Re-check containment for whatever's currently shown in the search results
+		// against the new track. If the search box is empty there's nothing visible
+		// to check yet — it'll run when the user actually types something.
+		if (playlistSearchQuery.trim()) {
+			performPlaylistSearch(accessToken, playlistSearchQuery);
+		}
 	}
 }
 
@@ -357,62 +362,103 @@ async function refreshLikedState(accessToken) {
 	}
 }
 
-// --- Playlists panel ---
+// --- Playlists panel (search-to-filter) ---
+//
+// Containment (which playlists already have the current track) is only ever
+// checked for playlists actually visible in the search results — not the whole
+// library — which is what keeps this from re-tripping Spotify's rate limit the
+// way eagerly checking every playlist on every track change did.
 
-let playlistRowEls = {}; // playlistId -> row element, rebuilt whenever playlistsCache changes
+const PLAYLIST_SEARCH_DEBOUNCE_MS = 150;
+const PLAYLIST_RESULTS_LIMIT = 12;
 
-async function refreshPlaylistsAndContainment(accessToken) {
-	const now = Date.now();
-	if (!playlistsCache || now - playlistsCacheAt > PLAYLISTS_CACHE_MS) {
-		let fetched;
-		try {
-			fetched = await SpotifyApi.getAllPlaylists(accessToken);
-		} catch (e) {
-			showToast('Couldn’t load playlists: ' + (e.message || e));
-			return;
-		}
+let playlistRowEls = {}; // playlistId -> row element, for the currently rendered search results
+let playlistSearchQuery = '';
+let playlistSearchDebounceTimer = null;
 
-		// Best-effort only — the playlist list must still render even if this fails,
-		// just without ownership info yet (isEditable defaults to true below, so a
-		// row simply behaves as it did before ownership checks existed until this
-		// succeeds on a later refresh).
-		if (!currentUserId) {
-			try {
-				const me = await SpotifyApi.getCurrentUser(accessToken);
-				currentUserId = me.id;
-			} catch (e) {
-				console.error('Failed to read current Spotify user:', e);
-			}
-		}
-
-		fetched.forEach(function (p) {
-			// Spotify returns 403 if you try to add/remove tracks on a playlist you
-			// don't own and isn't marked collaborative — only those are editable here.
-			p.isEditable = currentUserId
-				? !!(p.collaborative || (p.owner && p.owner.id === currentUserId))
-				: true;
-		});
-		fetched.sort(function (a, b) {
-			return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
-		});
-		playlistsCache = fetched;
-		playlistsCacheAt = now;
-		renderPlaylistsList();
-	}
-
-	checkContainmentForCurrentTrack(accessToken);
+function wirePlaylistSearch() {
+	const input = document.getElementById('playlistSearch');
+	input.addEventListener('input', function () {
+		const query = input.value;
+		if (playlistSearchDebounceTimer) clearTimeout(playlistSearchDebounceTimer);
+		playlistSearchDebounceTimer = setTimeout(function () {
+			withAccessToken(function (accessToken) { return performPlaylistSearch(accessToken, query); });
+		}, PLAYLIST_SEARCH_DEBOUNCE_MS);
+	});
 }
 
-// Full rebuild — only called when the playlist set itself changes (new fetch),
-// not on every containment check result, so an in-progress tap never lands on a
-// row that's about to be torn down and rebuilt out from under it.
-function renderPlaylistsList() {
+async function ensurePlaylistsLoaded(accessToken) {
+	const now = Date.now();
+	if (playlistsCache && now - playlistsCacheAt <= PLAYLISTS_CACHE_MS) return;
+
+	const fetched = await SpotifyApi.getAllPlaylists(accessToken);
+
+	// Best-effort only — the playlist list must still load even if this fails, just
+	// without ownership info yet (isEditable defaults to true below until it succeeds
+	// on a later refresh).
+	if (!currentUserId) {
+		try {
+			const me = await SpotifyApi.getCurrentUser(accessToken);
+			currentUserId = me.id;
+		} catch (e) {
+			console.error('Failed to read current Spotify user:', e);
+		}
+	}
+
+	fetched.forEach(function (p) {
+		// Spotify returns 403 if you try to add/remove tracks on a playlist you don't
+		// own and isn't marked collaborative — only those are editable here.
+		p.isEditable = currentUserId
+			? !!(p.collaborative || (p.owner && p.owner.id === currentUserId))
+			: true;
+	});
+	fetched.sort(function (a, b) {
+		return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+	});
+	playlistsCache = fetched;
+	playlistsCacheAt = now;
+}
+
+async function performPlaylistSearch(accessToken, query) {
+	playlistSearchQuery = query;
+	const hint = document.getElementById('playlistsHint');
+
+	if (!query.trim()) {
+		document.getElementById('playlistsList').innerHTML = '';
+		playlistRowEls = {};
+		hint.textContent = 'Type to search your playlists';
+		hint.style.display = '';
+		return;
+	}
+
+	try {
+		await ensurePlaylistsLoaded(accessToken);
+	} catch (e) {
+		showToast('Couldn’t load playlists: ' + (e.message || e));
+		return;
+	}
+
+	// A newer keystroke landed while this was loading — that call owns rendering now.
+	if (playlistSearchQuery !== query) return;
+
+	const q = query.trim().toLowerCase();
+	const matches = playlistsCache
+		.filter(function (p) { return p.name && p.name.toLowerCase().indexOf(q) !== -1; })
+		.slice(0, PLAYLIST_RESULTS_LIMIT);
+
+	renderPlaylistResults(matches);
+	hint.style.display = matches.length ? 'none' : '';
+	hint.textContent = 'No playlists match “' + query + '”';
+
+	checkContainmentForVisiblePlaylists(accessToken, matches);
+}
+
+function renderPlaylistResults(matches) {
 	const list = document.getElementById('playlistsList');
 	list.innerHTML = '';
 	playlistRowEls = {};
-	if (!playlistsCache) return;
 
-	playlistsCache.forEach(function (playlist) {
+	matches.forEach(function (playlist) {
 		const row = document.createElement('div');
 		row.className = 'playlist-row';
 		row.dataset.playlistId = playlist.id;
@@ -455,21 +501,21 @@ function updatePlaylistRowUI(playlistId) {
 		: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
 }
 
-async function checkContainmentForCurrentTrack(accessToken) {
-	if (!currentTrack || !playlistsCache) return;
-	const trackUri = currentTrack.uri;
+async function checkContainmentForVisiblePlaylists(accessToken, matches) {
+	if (!currentTrack) return;
 	const trackId = currentTrack.id;
+	const trackUri = currentTrack.uri;
 
-	playlistsCache.forEach(function (p) {
-		containmentState[p.id] = 'checking';
-		updatePlaylistRowUI(p.id);
-	});
+	// Skip anything already checked (or being checked) for this track — e.g. typing a
+	// narrower query after a broader one that already resolved these rows.
+	const toCheck = matches.filter(function (p) { return containmentState[p.id] === undefined; });
+	toCheck.forEach(function (p) { containmentState[p.id] = 'checking'; updatePlaylistRowUI(p.id); });
 
 	let firstError = null;
 	let index = 0;
 	async function worker() {
-		while (index < playlistsCache.length) {
-			const playlist = playlistsCache[index++];
+		while (index < toCheck.length) {
+			const playlist = toCheck[index++];
 			try {
 				const contains = await SpotifyApi.playlistContainsTrack(accessToken, playlist.id, trackUri);
 				if (!currentTrack || currentTrack.id !== trackId) return; // track changed mid-flight
@@ -481,9 +527,7 @@ async function checkContainmentForCurrentTrack(accessToken) {
 			}
 			updatePlaylistRowUI(playlist.id);
 
-			// Small stagger between requests so a large playlist library doesn't burst
-			// the whole sweep at once and trip Spotify's rate limit.
-			if (index < playlistsCache.length) {
+			if (index < toCheck.length) {
 				await new Promise(function (resolve) { setTimeout(resolve, CONTAINMENT_STAGGER_MS); });
 			}
 		}
@@ -549,6 +593,7 @@ function onIcueInitialized() {
 
 	applyStyles();
 	wirePlaybackControls();
+	wirePlaylistSearch();
 
 	// Seed with whatever is already sitting in the field (e.g. a code pasted in a
 	// previous session, already consumed) so we only react to a genuinely new paste

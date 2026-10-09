@@ -7,9 +7,12 @@ picker that highlights which of your playlists already contain the current song,
 a track is a single tap.
 
 - **Small** slot: album art + playback controls only.
-- **Medium / Large / Extra Large** slots: also shows your playlists below the controls
-  (to the side in horizontal/landscape mounting), with the current track's playlists
-  highlighted. Tap any playlist to add or remove the current track from it.
+- **Medium / Large / Extra Large** slots: also shows a playlist search box below the
+  controls (to the side in horizontal/landscape mounting). Type to filter your
+  playlists live as you go (the on-screen keyboard should pop up automatically when
+  you tap the box, same as any touch text field); matching playlists already containing
+  the current track are highlighted. Tap any result to add or remove the current track
+  from it.
 - A Liked Songs heart button next to the controls, same as stock Spotify.
 - Works in both horizontal and vertical Xeneon Edge mounting.
 
@@ -109,9 +112,13 @@ the widget keeps itself signed in using a refresh token (see **Token storage** b
 
 - Playback controls need an active Spotify Connect device (phone, desktop app, another
   speaker) — if nothing is open anywhere, Spotify's API has nothing to control.
-- Checking which playlists already contain the current track means paging through each
-  playlist's tracks; with a large number of playlists this fills in over a second or two
-  rather than instantly (each row shows a small spinner until it resolves).
+- Checking whether the current track is already in a playlist means paging through that
+  playlist's tracks, done only for the playlists your search currently matches — results
+  fill in over a moment rather than instantly (each row shows a small spinner until it
+  resolves).
+- Only playlists you own or collaborate on can be added to/removed from (Spotify rejects
+  edits to playlists you merely follow); those still show up in search and show their
+  highlight state, but tapping one explains why nothing happens instead of erroring.
 - The refresh interval (Settings → Playback) polls Spotify every 2–10 seconds; it does
   not use real-time push updates.
 
