@@ -278,12 +278,15 @@ async function updateTrackUI(data, accessToken) {
 		likedState = null;
 		containmentState = {};
 		refreshLikedState(accessToken);
-		// Re-check containment for whatever's currently shown in the search results
-		// against the new track. If the search box is empty there's nothing visible
-		// to check yet — it'll run when the user actually types something.
-		if (playlistSearchQuery.trim()) {
-			performPlaylistSearch(accessToken, playlistSearchQuery);
-		}
+		// Deliberately not re-running the playlist search automatically here. Any
+		// search results currently on screen are now stale (they reflect the
+		// previous track), so clear their highlight state without firing new
+		// network requests — press Enter again to re-check against the new track.
+		// Auto-firing a playlists-endpoint sweep on every single track change with
+		// no user action was quietly hammering that endpoint in the background.
+		Object.keys(playlistRowEls).forEach(function (playlistId) {
+			updatePlaylistRowUI(playlistId);
+		});
 	}
 }
 
