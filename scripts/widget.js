@@ -130,6 +130,16 @@ function showError(title, body) {
 	showState('error');
 }
 
+let toastTimer = null;
+function showToast(message) {
+	const toast = document.getElementById('toast');
+	toast.textContent = message;
+	toast.classList.add('is-visible');
+	if (toastTimer) clearTimeout(toastTimer);
+	toastTimer = setTimeout(function () { toast.classList.remove('is-visible'); }, 4000);
+	console.error(message);
+}
+
 // --- Spotify link opening (system browser, not the widget's own webview) ---
 
 function openExternalLink(url) {
@@ -328,25 +338,35 @@ async function refreshLikedState(accessToken) {
 
 // --- Playlists panel ---
 
+let playlistRowEls = {}; // playlistId -> row element, rebuilt whenever playlistsCache changes
+
 async function refreshPlaylistsAndContainment(accessToken) {
 	const now = Date.now();
 	if (!playlistsCache || now - playlistsCacheAt > PLAYLISTS_CACHE_MS) {
 		try {
-			playlistsCache = await SpotifyApi.getAllPlaylists(accessToken);
+			const fetched = await SpotifyApi.getAllPlaylists(accessToken);
+			fetched.sort(function (a, b) {
+				return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+			});
+			playlistsCache = fetched;
 			playlistsCacheAt = now;
+			renderPlaylistsList();
 		} catch (e) {
-			console.error('Failed to load playlists:', e);
+			showToast('Couldn’t load playlists: ' + (e.message || e));
 			return;
 		}
 	}
 
-	renderPlaylists();
 	checkContainmentForCurrentTrack(accessToken);
 }
 
-function renderPlaylists() {
+// Full rebuild — only called when the playlist set itself changes (new fetch),
+// not on every containment check result, so an in-progress tap never lands on a
+// row that's about to be torn down and rebuilt out from under it.
+function renderPlaylistsList() {
 	const list = document.getElementById('playlistsList');
 	list.innerHTML = '';
+	playlistRowEls = {};
 	if (!playlistsCache) return;
 
 	playlistsCache.forEach(function (playlist) {
@@ -354,25 +374,35 @@ function renderPlaylists() {
 		row.className = 'playlist-row';
 		row.dataset.playlistId = playlist.id;
 
-		const member = containmentState[playlist.id];
-		row.classList.toggle('is-member', member === true);
-		row.classList.toggle('is-checking', member === 'checking');
-
 		const name = document.createElement('div');
 		name.className = 'playlist-name';
 		name.textContent = playlist.name;
 
 		const check = document.createElement('div');
 		check.className = 'playlist-check';
-		check.innerHTML = member === 'checking'
-			? '<div class="mini-spinner"></div>'
-			: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
 
 		row.appendChild(name);
 		row.appendChild(check);
 		row.addEventListener('click', function () { togglePlaylistMembership(playlist.id); });
 		list.appendChild(row);
+
+		playlistRowEls[playlist.id] = row;
+		updatePlaylistRowUI(playlist.id);
 	});
+}
+
+// Updates one row in place from containmentState — never rebuilds the list, so it
+// can run freely (once per playlist as containment checks resolve) without ever
+// stealing an in-flight tap on another row.
+function updatePlaylistRowUI(playlistId) {
+	const row = playlistRowEls[playlistId];
+	if (!row) return;
+	const member = containmentState[playlistId];
+	row.classList.toggle('is-member', member === true);
+	row.classList.toggle('is-checking', member === 'checking');
+	row.querySelector('.playlist-check').innerHTML = member === 'checking'
+		? '<div class="mini-spinner"></div>'
+		: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
 }
 
 async function checkContainmentForCurrentTrack(accessToken) {
@@ -380,9 +410,12 @@ async function checkContainmentForCurrentTrack(accessToken) {
 	const trackUri = currentTrack.uri;
 	const trackId = currentTrack.id;
 
-	playlistsCache.forEach(function (p) { containmentState[p.id] = 'checking'; });
-	renderPlaylists();
+	playlistsCache.forEach(function (p) {
+		containmentState[p.id] = 'checking';
+		updatePlaylistRowUI(p.id);
+	});
 
+	let firstError = null;
 	let index = 0;
 	async function worker() {
 		while (index < playlistsCache.length) {
@@ -394,14 +427,19 @@ async function checkContainmentForCurrentTrack(accessToken) {
 			} catch (e) {
 				if (!currentTrack || currentTrack.id !== trackId) return;
 				containmentState[playlist.id] = false;
+				if (!firstError) firstError = e;
 			}
-			renderPlaylists();
+			updatePlaylistRowUI(playlist.id);
 		}
 	}
 
 	const workers = [];
 	for (let i = 0; i < CONTAINMENT_CONCURRENCY; i++) workers.push(worker());
 	await Promise.all(workers);
+
+	if (firstError) {
+		showToast('Playlist check failed: ' + (firstError.message || firstError));
+	}
 }
 
 async function togglePlaylistMembership(playlistId) {
@@ -411,7 +449,7 @@ async function togglePlaylistMembership(playlistId) {
 	const wasMember = containmentState[playlistId] === true;
 
 	containmentState[playlistId] = !wasMember;
-	renderPlaylists();
+	updatePlaylistRowUI(playlistId);
 
 	withAccessToken(async function (accessToken) {
 		try {
@@ -421,10 +459,10 @@ async function togglePlaylistMembership(playlistId) {
 				await SpotifyApi.addTrackToPlaylist(accessToken, playlistId, trackUri);
 			}
 		} catch (e) {
-			console.error('Failed to update playlist:', e);
+			showToast('Couldn’t update playlist: ' + (e.message || e));
 			if (currentTrack && currentTrack.id === trackId) {
 				containmentState[playlistId] = wasMember;
-				renderPlaylists();
+				updatePlaylistRowUI(playlistId);
 			}
 		}
 	});

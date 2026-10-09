@@ -156,29 +156,31 @@
           <div class="art-wrap">
             <img class="album-art" id="albumArt" alt="" />
           </div>
-          <div class="track-info">
-            <div class="track-name" id="trackName"></div>
-            <div class="track-artist" id="trackArtist"></div>
-          </div>
-          <div class="progress-row">
-            <span class="time-label" id="timeElapsed">0:00</span>
-            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-            <span class="time-label" id="timeTotal">0:00</span>
-          </div>
-          <div class="controls-row">
-            <button class="ctrl-btn like-btn" id="likeBtn" type="button" aria-label="Like">
-              <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.1C.5 8.6 2 5 5.6 5c2 0 3.4 1 4.4 2.4C11 6 12.4 5 14.4 5 18 5 19.5 8.6 22 11.9 19.5 16.4 12 21 12 21z"/></svg>
-            </button>
-            <button class="ctrl-btn" id="prevBtn" type="button" aria-label="Previous">
-              <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM20 6v12l-10-6z"/></svg>
-            </button>
-            <button class="ctrl-btn play-btn" id="playPauseBtn" type="button" aria-label="Play or pause">
-              <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-            </button>
-            <button class="ctrl-btn" id="nextBtn" type="button" aria-label="Next">
-              <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6v12l10-6z"/></svg>
-            </button>
+          <div class="player-details">
+            <div class="track-info">
+              <div class="track-name" id="trackName"></div>
+              <div class="track-artist" id="trackArtist"></div>
+            </div>
+            <div class="progress-row">
+              <span class="time-label" id="timeElapsed">0:00</span>
+              <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+              <span class="time-label" id="timeTotal">0:00</span>
+            </div>
+            <div class="controls-row">
+              <button class="ctrl-btn like-btn" id="likeBtn" type="button" aria-label="Like">
+                <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.1C.5 8.6 2 5 5.6 5c2 0 3.4 1 4.4 2.4C11 6 12.4 5 14.4 5 18 5 19.5 8.6 22 11.9 19.5 16.4 12 21 12 21z"/></svg>
+              </button>
+              <button class="ctrl-btn" id="prevBtn" type="button" aria-label="Previous">
+                <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM20 6v12l-10-6z"/></svg>
+              </button>
+              <button class="ctrl-btn play-btn" id="playPauseBtn" type="button" aria-label="Play or pause">
+                <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+              </button>
+              <button class="ctrl-btn" id="nextBtn" type="button" aria-label="Next">
+                <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6v12l10-6z"/></svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -188,6 +190,8 @@
         </div>
       </div>
     </div>
+
+    <div class="toast" id="toast"></div>
   </div>
 
   <script src="scripts/pkce.js"></script>

@@ -5,20 +5,21 @@
 	--bg-opacity: 1;
 	--bg-blur: 0px;
 
-	--layout-unit: 1vmin;
-	--space-gap: calc(var(--layout-unit) * 4);
-	--space-pad: calc(var(--layout-unit) * 6);
-	--radius-card: calc(var(--layout-unit) * 3.5);
-	--radius-art: calc(var(--layout-unit) * 3);
+	--radius-card: 10px;
+	--radius-art: 8px;
 
-	--font-track: calc(var(--layout-unit) * 8);
-	--font-artist: calc(var(--layout-unit) * 5);
-	--font-label: calc(var(--layout-unit) * 3.2);
-	--font-title: calc(var(--layout-unit) * 6);
-	--font-body: calc(var(--layout-unit) * 4);
-
-	--ctrl-size: calc(var(--layout-unit) * 11);
-	--ctrl-icon: calc(var(--layout-unit) * 5);
+	/* The player (art + track info + controls) is a fixed, constant size at every
+	   slot size — only the playlist panel grows to use extra space. These are plain
+	   px, not vmin: this widget only ever renders at 8 known Xeneon Edge resolutions,
+	   so there's no need for viewport-relative scaling here. */
+	--art-size: 110px;
+	--font-track: 20px;
+	--font-artist: 14px;
+	--font-label: 12px;
+	--font-title: 18px;
+	--font-body: 14px;
+	--ctrl-size: 38px;
+	--ctrl-icon: 17px;
 }
 
 html {
@@ -75,7 +76,7 @@ body {
 	box-sizing: border-box;
 	width: 100%;
 	height: 100%;
-	padding: var(--space-pad);
+	padding: 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -92,7 +93,7 @@ body {
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: calc(var(--layout-unit) * 2.5);
+	gap: 10px;
 	width: 100%;
 	height: 100%;
 	text-align: center;
@@ -102,7 +103,7 @@ body {
 .state-panel.is-active { display: flex; }
 
 .state-icon {
-	font-size: calc(var(--layout-unit) * 10);
+	font-size: 36px;
 	line-height: 1;
 	opacity: 0.85;
 }
@@ -119,22 +120,23 @@ body {
 }
 
 .connect-button, .retry-button {
-	margin-top: calc(var(--layout-unit) * 2);
-	padding: calc(var(--layout-unit) * 2.5) calc(var(--layout-unit) * 6);
-	border-radius: calc(var(--layout-unit) * 6);
+	margin-top: 8px;
+	padding: 10px 24px;
+	border-radius: 999px;
 	border: none;
 	background: var(--accent-color);
 	color: #000000;
 	font-size: var(--font-body);
 	font-weight: 700;
 	cursor: pointer;
+	touch-action: manipulation;
 }
 
 .spinner {
-	width: calc(var(--layout-unit) * 8);
-	height: calc(var(--layout-unit) * 8);
+	width: 28px;
+	height: 28px;
 	border-radius: 50%;
-	border: calc(var(--layout-unit) * 0.8) solid rgba(255, 255, 255, 0.25);
+	border: 3px solid rgba(255, 255, 255, 0.25);
 	border-top-color: var(--text-color);
 	animation: spin 0.9s linear infinite;
 }
@@ -150,31 +152,30 @@ body {
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
-	gap: calc(var(--layout-unit) * 6);
+	gap: 18px;
 }
 
 .content.is-active { display: flex; }
 
+/* Player: art on the left, track info + progress + controls stacked on the right.
+   Fixed size at every slot size — this composition never grows or shrinks between
+   S/M/L/XL. Only extra space (when playlists are shown) changes. */
 .player-area {
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
 	align-items: center;
-	justify-content: center;
-	gap: var(--space-gap);
-	min-width: 0;
-	min-height: 0;
+	gap: 14px;
+	flex: 0 0 auto;
 }
 
 .art-wrap {
 	flex: 0 0 auto;
-	width: calc(var(--layout-unit) * 38);
-	height: calc(var(--layout-unit) * 38);
-	max-width: 60%;
-	max-height: 55%;
+	width: var(--art-size);
+	height: var(--art-size);
 	border-radius: var(--radius-art);
 	overflow: hidden;
 	background: rgba(255, 255, 255, 0.06);
-	box-shadow: 0 calc(var(--layout-unit) * 1.5) calc(var(--layout-unit) * 4) rgba(0, 0, 0, 0.4);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .album-art {
@@ -184,10 +185,16 @@ body {
 	display: block;
 }
 
+.player-details {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 8px;
+	width: 240px;
+	min-width: 0;
+}
+
 .track-info {
-	width: 100%;
-	max-width: 90%;
-	text-align: center;
 	min-width: 0;
 }
 
@@ -208,11 +215,9 @@ body {
 }
 
 .progress-row {
-	width: 100%;
-	max-width: 90%;
 	display: flex;
 	align-items: center;
-	gap: calc(var(--layout-unit) * 2);
+	gap: 8px;
 }
 
 .time-label {
@@ -224,8 +229,7 @@ body {
 
 .progress-track {
 	flex: 1 1 auto;
-	height: calc(var(--layout-unit) * 1);
-	min-height: 3px;
+	height: 4px;
 	border-radius: 999px;
 	background: rgba(255, 255, 255, 0.2);
 	overflow: hidden;
@@ -241,8 +245,7 @@ body {
 .controls-row {
 	display: flex;
 	align-items: center;
-	justify-content: center;
-	gap: calc(var(--layout-unit) * 3);
+	gap: 10px;
 }
 
 .ctrl-btn {
@@ -257,6 +260,7 @@ body {
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
+	touch-action: manipulation;
 }
 
 .ctrl-btn svg {
@@ -276,15 +280,15 @@ body {
 	color: var(--accent-color);
 }
 
-/* ---------- Playlists panel (hidden at Small) ---------- */
+/* ---------- Playlists panel (hidden at Small; takes all remaining space otherwise) ---------- */
 
 .playlists-area {
+	display: none;
 	flex: 1 1 auto;
 	min-width: 0;
 	min-height: 0;
-	display: flex;
 	flex-direction: column;
-	gap: calc(var(--layout-unit) * 2);
+	gap: 8px;
 }
 
 .playlists-header {
@@ -299,21 +303,26 @@ body {
 	flex: 1 1 auto;
 	min-height: 0;
 	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	touch-action: pan-y;
 	display: flex;
 	flex-direction: column;
-	gap: calc(var(--layout-unit) * 1.5);
+	gap: 6px;
 }
 
 .playlist-row {
 	display: flex;
 	align-items: center;
-	gap: calc(var(--layout-unit) * 2.5);
-	padding: calc(var(--layout-unit) * 2) calc(var(--layout-unit) * 3);
+	gap: 10px;
+	padding: 9px 12px;
 	border-radius: var(--radius-card);
 	background: rgba(255, 255, 255, 0.05);
-	border: calc(var(--layout-unit) * 0.3) solid transparent;
+	border: 1.5px solid transparent;
 	cursor: pointer;
 	flex: 0 0 auto;
+	touch-action: manipulation;
+	user-select: none;
+	-webkit-user-select: none;
 }
 
 .playlist-row.is-member {
@@ -336,8 +345,8 @@ body {
 
 .playlist-check {
 	flex: 0 0 auto;
-	width: calc(var(--layout-unit) * 4.5);
-	height: calc(var(--layout-unit) * 4.5);
+	width: 18px;
+	height: 18px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -354,56 +363,64 @@ body {
 
 .playlist-row.is-checking .playlist-check .mini-spinner {
 	display: block;
-	width: calc(var(--layout-unit) * 3.5);
-	height: calc(var(--layout-unit) * 3.5);
+	width: 14px;
+	height: 14px;
 	border-radius: 50%;
-	border: calc(var(--layout-unit) * 0.6) solid rgba(255, 255, 255, 0.25);
+	border: 2px solid rgba(255, 255, 255, 0.25);
 	border-top-color: var(--text-color);
 	animation: spin 0.9s linear infinite;
 }
 
 .mini-spinner { display: none; }
 
-/* ---------- Layout: wide (row) vs tall (column) slots ---------- */
+/* ---------- Layout: side-by-side (horizontal) vs stacked (vertical) slots ---------- */
 
-/* Default (aspect-ratio >= 1): side-by-side — player left, playlists right */
+/* Default (aspect-ratio >= 1): side-by-side — player left, playlists right.
+   justify-content only has any visible effect when playlists-area is hidden
+   (Small) — with it visible, its flex:1 already consumes all remaining space. */
 .content {
 	flex-direction: row;
+	align-items: center;
+	justify-content: center;
 }
-
-.player-area { flex: 0 0 46%; }
 
 /* Tall / portrait slots: stack — player on top, playlists below */
 @media (max-aspect-ratio: 0.95) {
-	.content { flex-direction: column; }
-	.player-area { flex: 0 0 auto; width: 100%; }
-	.playlists-area { width: 100%; }
+	.content { flex-direction: column; align-items: stretch; }
+	.player-area { align-self: center; }
 }
 
-/* Small slots (S-H 840x344, S-V 696x416): art + controls only, no playlists,
-   laid out as a compact horizontal strip. Height is the reliable discriminator —
-   S is the only size family under ~450px tall; every M/L/XL variant (H or V) is
-   696px+ tall. */
-@media (max-height: 450px) {
-	.playlists-area { display: none !important; }
+/* Medium/Large/Extra Large only: show the playlist panel. Height is the reliable
+   discriminator for Small — S-H and L-H have nearly identical aspect ratios, but
+   every M/L/XL slot (H or V) is 696px+ tall while both S slots are under 420px. */
+@media (min-height: 451px) {
+	.playlists-area { display: flex; }
+}
 
-	.content { flex-direction: row; }
+/* ---------- Toast (diagnostic error messages) ---------- */
 
-	.player-area {
-		flex-direction: row;
-		width: 100%;
-		gap: calc(var(--layout-unit) * 5);
-	}
+.toast {
+	position: absolute;
+	left: 50%;
+	bottom: 14px;
+	transform: translateX(-50%) translateY(8px);
+	max-width: 90%;
+	padding: 8px 16px;
+	border-radius: 999px;
+	background: rgba(20, 20, 20, 0.95);
+	color: #ff6b6b;
+	font-size: 12px;
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s ease, transform 0.2s ease;
+	z-index: 5;
+}
 
-	.art-wrap {
-		width: calc(var(--layout-unit) * 28);
-		height: calc(var(--layout-unit) * 28);
-		max-width: none;
-		max-height: 85%;
-	}
-
-	.track-info { text-align: left; max-width: none; }
-	.progress-row { max-width: none; }
-
-	.playlists-header { display: none; }
+.toast.is-visible {
+	opacity: 1;
+	transform: translateX(-50%) translateY(0);
 }
