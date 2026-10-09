@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spotify Authorization Code</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0b0b0c;
+    color: #ffffff;
+    font-family: -apple-system, Segoe UI, Arial, sans-serif;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .card {
+    max-width: 480px;
+    width: 100%;
+    background: #161616;
+    border-radius: 16px;
+    padding: 32px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { opacity: 0.75; line-height: 1.5; font-size: 14px; }
+  .code-box {
+    margin: 20px 0;
+    padding: 16px;
+    background: #000000;
+    border-radius: 10px;
+    word-break: break-all;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    user-select: all;
+  }
+  button {
+    appearance: none;
+    border: none;
+    border-radius: 999px;
+    padding: 12px 28px;
+    font-size: 14px;
+    font-weight: 700;
+    background: #1db954;
+    color: #000000;
+    cursor: pointer;
+  }
+  button:active { opacity: 0.85; }
+  .status { margin-top: 10px; font-size: 13px; opacity: 0.7; min-height: 18px; }
+  .error { color: #ff6b6b; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <!-- populated by script -->
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const error = params.get('error');
+    const card = document.getElementById('card');
+
+    if (error) {
+      card.innerHTML =
+        '<h1>Authorization was not completed</h1>' +
+        '<p>Spotify reported: <strong>' + escapeHtml(error) + '</strong>. ' +
+        'Go back to the widget in iCUE and tap "Connect to Spotify" to try again.</p>';
+    } else if (code) {
+      card.innerHTML =
+        '<h1>Authorization Code</h1>' +
+        '<p>Copy this code, then paste it into the widget’s <strong>Paste Authorization Code</strong> ' +
+        'field under <strong>Spotify Connection</strong> in iCUE’s widget settings.</p>' +
+        '<div class="code-box" id="codeBox">' + escapeHtml(code) + '</div>' +
+        '<button id="copyBtn">Copy Code</button>' +
+        '<div class="status" id="status"></div>';
+
+      document.getElementById('copyBtn').addEventListener('click', function () {
+        const status = document.getElementById('status');
+        navigator.clipboard.writeText(code).then(function () {
+          status.textContent = 'Copied to clipboard.';
+        }).catch(function () {
+          status.textContent = 'Could not auto-copy — select the code above and copy it manually.';
+        });
+      });
+    } else {
+      card.innerHTML =
+        '<h1>No Authorization Code Found</h1>' +
+        '<p>This page is the redirect target for the Spotify Now Playing iCUE widget’s login flow. ' +
+        'It should only be opened by Spotify after you approve access — go back to the widget and tap ' +
+        '"Connect to Spotify" to start again.</p>';
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>tr('Spotify Now Playing')</title>
+  <link rel="icon" type="image/svg+xml" href="resources/icon.svg" />
+
+  <meta name="x-icue-restrictions" data-restrictions='[{ "device": "dashboard_lcd" }]' />
+
+  <!-- Spotify Connection -->
+  <meta name="x-icue-property" content="spotifyClientId" data-label="tr('Spotify Client ID')" data-type="textfield" data-default="''" />
+  <meta name="x-icue-property" content="spotifyAuthCode" data-label="tr('Paste Authorization Code')" data-type="textfield" data-default="''" />
+
+  <!-- Playback -->
+  <meta name="x-icue-property" content="pollIntervalSec" data-label="tr('Refresh Interval')" data-type="slider" data-default="3" data-min="2" data-max="10" data-step="1" data-unit-label="'s'" />
+
+  <!-- MediaViewer — inlined to avoid iCUE file:// script-loading restrictions -->
+  <style>
+    .position-container { position: absolute; transform-origin: top left; }
+    .scale-container { transform-origin: top left; }
+    .rotation-container { transform-origin: center center; }
+    .rotation-container img, .rotation-container video { display: block; object-fit: contain; }
+  </style>
+  <script>
+    class MediaViewer {
+      constructor(options = {}) {
+        this.container = options.container;
+        this.onMediaLoaded = options.onMediaLoaded || (() => {});
+        this.onMediaError = options.onMediaError || (() => {});
+        this.debug = options.debug || false;
+        this.positionContainer = null; this.scaleContainer = null; this.rotationContainer = null;
+        this.mediaElement = null; this.currentMediaPath = null;
+        this.supportedImageFormats = ["jpg","jpeg","png","gif","bmp","webp","svg","ico"];
+        this.supportedVideoFormats = ["mp4","webm","ogg","mov","avi","mkv"];
+        if (!this.container) throw new Error("MediaViewer: container is required");
+      }
+      getFileExtension(p) { return p.split(".").pop().toLowerCase(); }
+      isImageFile(e) { return this.supportedImageFormats.includes(e); }
+      isVideoFile(e) { return this.supportedVideoFormats.includes(e); }
+      log(...a) { if (this.debug) console.log("[MediaViewer]", ...a); }
+      warn(...a) { if (this.debug) console.warn("[MediaViewer]", ...a); }
+      error(...a) { console.error("[MediaViewer]", ...a); }
+      createImageElement(filePath) {
+        const img = document.createElement("img");
+        img.src = filePath;
+        img.onerror = () => { this.error("Failed to load image:", filePath); this.onMediaError(new Error("Failed to load image: " + filePath)); };
+        img.onload  = () => { this.log("Image loaded:", filePath); this.onMediaLoaded(img); };
+        return img;
+      }
+      createVideoElement(filePath) {
+        const video = document.createElement("video");
+        video.controls = false; video.autoplay = true; video.loop = true; video.muted = true; video.playsInline = true;
+        video.addEventListener("loadeddata", () => {
+          video.play().then(() => { this.onMediaLoaded(video); }).catch(e => { this.error("Error playing video:", e); this.onMediaError(e); });
+        });
+        video.addEventListener("error", e => { this.error("Video error:", e); this.onMediaError(new Error("Video error: " + (video.error?.message || "Unknown"))); });
+        video.src = filePath;
+        return video;
+      }
+      createMediaElement(filePath) {
+        const ext = this.getFileExtension(filePath);
+        if (this.isImageFile(ext)) return this.createImageElement(filePath);
+        if (this.isVideoFile(ext)) return this.createVideoElement(filePath);
+        this.error("Unsupported format:", ext); this.onMediaError(new Error("Unsupported format: " + ext)); return null;
+      }
+      createContainers() {
+        this.positionContainer = document.createElement("div"); this.positionContainer.className = "position-container";
+        this.scaleContainer    = document.createElement("div"); this.scaleContainer.className    = "scale-container";
+        this.rotationContainer = document.createElement("div"); this.rotationContainer.className = "rotation-container";
+        this.rotationContainer.appendChild(this.mediaElement);
+        this.scaleContainer.appendChild(this.rotationContainer);
+        this.positionContainer.appendChild(this.scaleContainer);
+        return this.positionContainer;
+      }
+      applyTransform(params = {}) {
+        if (!this.positionContainer) return;
+        const baseWidth = params.baseWidth || 100; const baseHeight = params.baseHeight || 100;
+        const scaleValue = params.scale !== undefined ? params.scale : 1;
+        const posX = params.positionX || 0; const posY = params.positionY || 0; const rotation = params.angle || 0;
+        const minScale = Math.min(this.container.clientWidth / baseWidth, this.container.clientHeight / baseHeight);
+        this.positionContainer.style.transform = `translate(${posX * minScale}px, ${posY * minScale}px)`;
+        this.scaleContainer.style.transform    = `scale(${scaleValue * minScale})`;
+        this.rotationContainer.style.transform = `rotate(${rotation}deg)`;
+      }
+      loadMedia(params = {}) {
+        const filePath = params.path; if (!filePath) { this.clear(); return; }
+        const decoded = decodeURIComponent(filePath);
+        if (this.currentMediaPath === decoded) { this.applyTransform(params); return; }
+        this.clear();
+        this.mediaElement = this.createMediaElement(decoded); if (!this.mediaElement) return;
+        this.container.appendChild(this.createContainers());
+        this.container.style.visibility = "visible";
+        this.applyTransform(params); this.currentMediaPath = decoded;
+      }
+      clear() {
+        this.container.innerHTML = ""; this.container.style.visibility = "hidden";
+        this.positionContainer = this.scaleContainer = this.rotationContainer = this.mediaElement = this.currentMediaPath = null;
+      }
+      destroy() { this.clear(); this.container = this.onMediaLoaded = this.onMediaError = null; }
+    }
+  </script>
+
+  <!-- Widget Personalization -->
+  <meta name="x-icue-property" content="textColor" data-label="tr('Text Color')" data-type="color" data-default="'#ffffff'" />
+  <meta name="x-icue-property" content="accentColor" data-label="tr('Accent Color')" data-type="color" data-default="'#1db954'" />
+  <meta name="x-icue-property" content="backgroundColor" data-label="tr('Background Color')" data-type="color" data-default="'#000000'" />
+  <meta name="x-icue-property" content="backgroundMedia" data-label="tr('Background Image')" data-type="media-selector" data-filters="['*.png','*.jpg','*.jpeg','*.webp']" />
+  <meta name="x-icue-property" content="glassBlur" data-label="tr('Glass Blur')" data-type="slider" data-default="0" data-min="0" data-max="30" data-step="1" />
+  <meta name="x-icue-property" content="transparency" data-label="tr('Background Transparency')" data-type="slider" data-default="100" data-min="0" data-max="100" data-step="1" />
+
+  <script id="x-icue-groups" type="application/json">
+  [
+    { "title": "tr('Spotify Connection')", "properties": ["spotifyClientId", "spotifyAuthCode"], "info": "tr('See the README for how to create a Spotify Client ID and authorize this widget.')" },
+    { "title": "tr('Playback')", "properties": ["pollIntervalSec"] },
+    { "title": "tr('Widget Personalization')", "properties": ["textColor", "accentColor", "backgroundColor", "backgroundMedia", "glassBlur", "transparency"] }
+  ]
+  </script>
+
+  <link rel="stylesheet" type="text/css" href="styles/widget.css" />
+</head>
+<body>
+  <div class="widget-root">
+    <div class="widget-background" aria-hidden="true">
+      <div class="main-glass"></div>
+      <div id="media-background"></div>
+    </div>
+
+    <div class="main-content">
+      <div class="state-panel disconnected-state">
+        <div class="state-icon">&#9834;</div>
+        <div class="state-title" id="disconnectedTitle">Connect to Spotify</div>
+        <div class="state-body" id="disconnectedBody">Enter your Client ID in settings, then tap below.</div>
+        <button class="connect-button" id="connectBtn" type="button">Connect to Spotify</button>
+      </div>
+
+      <div class="state-panel loading-state">
+        <div class="spinner"></div>
+        <div class="state-title">Loading</div>
+      </div>
+
+      <div class="state-panel empty-state">
+        <div class="state-icon">&#9834;</div>
+        <div class="state-title">Nothing Playing</div>
+        <div class="state-body">Start playback on Spotify to see it here.</div>
+      </div>
+
+      <div class="state-panel error-state">
+        <div class="state-icon">!</div>
+        <div class="state-title" id="errorTitle">Connection Issue</div>
+        <div class="state-body" id="errorBody"></div>
+      </div>
+
+      <div class="content" id="content">
+        <div class="player-area">
+          <div class="art-wrap">
+            <img class="album-art" id="albumArt" alt="" />
+          </div>
+          <div class="track-info">
+            <div class="track-name" id="trackName"></div>
+            <div class="track-artist" id="trackArtist"></div>
+          </div>
+          <div class="progress-row">
+            <span class="time-label" id="timeElapsed">0:00</span>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            <span class="time-label" id="timeTotal">0:00</span>
+          </div>
+          <div class="controls-row">
+            <button class="ctrl-btn like-btn" id="likeBtn" type="button" aria-label="Like">
+              <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.1C.5 8.6 2 5 5.6 5c2 0 3.4 1 4.4 2.4C11 6 12.4 5 14.4 5 18 5 19.5 8.6 22 11.9 19.5 16.4 12 21 12 21z"/></svg>
+            </button>
+            <button class="ctrl-btn" id="prevBtn" type="button" aria-label="Previous">
+              <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM20 6v12l-10-6z"/></svg>
+            </button>
+            <button class="ctrl-btn play-btn" id="playPauseBtn" type="button" aria-label="Play or pause">
+              <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+            </button>
+            <button class="ctrl-btn" id="nextBtn" type="button" aria-label="Next">
+              <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6v12l10-6z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="playlists-area" id="playlistsArea">
+          <div class="playlists-header">Your Playlists</div>
+          <div class="playlists-list" id="playlistsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="scripts/pkce.js"></script>
+  <script src="scripts/spotify-auth.js"></script>
+  <script src="scripts/spotify-api.js"></script>
+  <script src="scripts/widget.js"></script>
+</body>
+</html>

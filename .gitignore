@@ -1,0 +1,6 @@
+# Packaged widget (attach to GitHub releases instead)
+dist/
+*.icuewidget
+
+# Claude Code local settings (machine-specific tool permissions)
+.claude/settings.local.json

@@ -1,0 +1,24 @@
+{
+	"author": "Desmond Harris",
+	"id": "com.desmond-harris.xeneon-spotify-widget",
+	"name": "Spotify Now Playing",
+	"description": "Shows the currently playing Spotify track with playback controls, a Liked Songs toggle, and a playlist picker that highlights which playlists already contain the current track.",
+	"version": "1.0.0",
+	"preview_icon": "resources/icon.svg",
+	"min_app_version": "5.47",
+	"min_framework_version": "1.0.0",
+	"os": [
+		{
+			"platform": "windows"
+		}
+	],
+	"supported_devices": [
+		{
+			"type": "dashboard_lcd"
+		}
+	],
+	"interactive": true,
+	"required_plugins": [
+		"widgetbuilder.linkprovider:Url:1.0"
+	]
+}

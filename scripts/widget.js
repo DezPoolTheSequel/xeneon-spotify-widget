@@ -1,0 +1,476 @@
+// Redirect URI registered on the Spotify Developer dashboard — a static page in this
+// repo's GitHub Pages site. See README.md for setup.
+const SPOTIFY_REDIRECT_URI = 'https://dezpoolthesequel.github.io/xeneon-spotify-widget/callback.html';
+
+const PLAYLISTS_CACHE_MS = 5 * 60 * 1000;
+const CONTAINMENT_CONCURRENCY = 3;
+
+let lastSeenAuthCode = '';
+let pollTimer = null;
+let currentTrack = null; // { id, uri, name, artist, imageUrl, durationMs, progressMs, isPlaying }
+let likedState = null;
+let playlistsCache = null;
+let playlistsCacheAt = 0;
+let containmentState = {}; // playlistId -> true | false | 'checking'
+let consecutiveErrors = 0;
+
+// --- iCUE property access (see references/html-template.md for rationale) ---
+
+function getIcueProperty(name) {
+	if (typeof window !== 'undefined' && Object.prototype.hasOwnProperty.call(window, name)) {
+		const value = window[name];
+		if (value !== undefined && value !== null && value !== '') return value;
+	}
+	try {
+		const value = Function('return typeof ' + name + ' !== "undefined" ? ' + name + ' : undefined')();
+		if (value !== undefined && value !== null && value !== '') return value;
+	} catch (e) {}
+	return undefined;
+}
+
+function clampRange(v, min, max, d) {
+	v = Number(v);
+	if (!Number.isFinite(v)) return d;
+	return Math.max(min, Math.min(max, v));
+}
+
+function resolveMediaPath(value) {
+	if (!value) return '';
+	if (typeof value === 'string') return value;
+	if (value.pathToAsset) return value.pathToAsset;
+	if (value.path) return value.path;
+	return '';
+}
+
+function normalizeMediaConfig(rawMedia) {
+	const mediaPath = resolveMediaPath(rawMedia);
+	if (!mediaPath) return null;
+	const base = (rawMedia && typeof rawMedia === 'object') ? rawMedia : {};
+	return {
+		path: base.pathToAsset || mediaPath,
+		baseWidth: Number(base.baseWidth) || 0,
+		baseHeight: Number(base.baseHeight) || 0,
+		scale: Number.isFinite(Number(base.scale)) ? Number(base.scale) : 1,
+		positionX: Number(base.positionX) || 0,
+		positionY: Number(base.positionY) || 0,
+		angle: Number(base.angle) || 0
+	};
+}
+
+// --- Media background ---
+
+const mediaMount = document.getElementById('media-background');
+
+function createMediaBackgroundComponent(container) {
+	if (!container) return { clear: function () {}, loadMedia: function () {} };
+
+	if (typeof MediaViewer === 'function') {
+		const viewer = new MediaViewer({
+			container: container,
+			onMediaError: function (error) { console.error('Media background error:', error); }
+		});
+		return {
+			clear: function () { viewer.clear(); },
+			loadMedia: function (config) { viewer.loadMedia(config); }
+		};
+	}
+
+	// Static fallback when MediaViewer is unavailable (e.g. plain browser testing)
+	return {
+		clear: function () { container.style.backgroundImage = ''; container.style.visibility = 'hidden'; },
+		loadMedia: function (config) {
+			const p = config && config.path;
+			if (!p) { container.style.backgroundImage = ''; container.style.visibility = 'hidden'; return; }
+			container.style.backgroundImage = "url('" + String(p).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "')";
+			container.style.backgroundRepeat = 'no-repeat';
+			container.style.backgroundSize = 'cover';
+			container.style.backgroundPosition = 'center';
+			container.style.visibility = 'visible';
+		}
+	};
+}
+
+const mediaBackgroundComponent = createMediaBackgroundComponent(mediaMount);
+
+function applyStyles() {
+	const root = document.documentElement;
+
+	const bgTransparency = clampRange(getIcueProperty('transparency'), 0, 100, 100) / 100;
+	root.style.setProperty('--bg-opacity', bgTransparency);
+
+	const tc = getIcueProperty('textColor');
+	const ac = getIcueProperty('accentColor');
+	const bgc = getIcueProperty('backgroundColor');
+	root.style.setProperty('--text-color', (typeof tc === 'string' && tc) ? tc : '#ffffff');
+	root.style.setProperty('--accent-color', (typeof ac === 'string' && ac) ? ac : '#1db954');
+	root.style.setProperty('--bg-color', (typeof bgc === 'string' && bgc) ? bgc : '#000000');
+	root.style.setProperty('--bg-blur', clampRange(getIcueProperty('glassBlur'), 0, 30, 0) + 'px');
+
+	const mediaConfig = normalizeMediaConfig(getIcueProperty('backgroundMedia'));
+	if (!mediaConfig) {
+		mediaBackgroundComponent.clear();
+	} else {
+		mediaBackgroundComponent.loadMedia(mediaConfig);
+	}
+}
+
+// --- State machine ---
+
+function showState(state) {
+	const panels = ['disconnected-state', 'loading-state', 'empty-state', 'error-state'];
+	panels.forEach(function (cls) {
+		document.querySelector('.' + cls).classList.toggle('is-active', cls.indexOf(state) === 0);
+	});
+	document.getElementById('content').classList.toggle('is-active', state === 'content');
+}
+
+function showError(title, body) {
+	document.getElementById('errorTitle').textContent = title;
+	document.getElementById('errorBody').textContent = body || '';
+	showState('error');
+}
+
+// --- Spotify link opening (system browser, not the widget's own webview) ---
+
+function openExternalLink(url) {
+	if (window.plugins && window.plugins.Linkprovider && typeof pluginLinkprovider_initialized !== 'undefined' && pluginLinkprovider_initialized) {
+		window.plugins.Linkprovider.open(url);
+	} else {
+		window.open(url, '_blank');
+	}
+}
+
+async function handleConnectClick() {
+	const clientId = getIcueProperty('spotifyClientId');
+	if (!clientId) {
+		showError('Client ID Missing', 'Enter your Spotify Client ID in the widget settings first.');
+		return;
+	}
+	const url = await SpotifyAuth.buildAuthorizeUrl(clientId, SPOTIFY_REDIRECT_URI);
+	openExternalLink(url);
+}
+
+async function checkAuthCodeChanged() {
+	const code = getIcueProperty('spotifyAuthCode');
+	if (!code || code === lastSeenAuthCode) return;
+	lastSeenAuthCode = code;
+
+	const clientId = getIcueProperty('spotifyClientId');
+	if (!clientId) {
+		showError('Client ID Missing', 'Enter your Spotify Client ID in the widget settings first.');
+		return;
+	}
+
+	showState('loading');
+	try {
+		await SpotifyAuth.exchangeCode(code, clientId, SPOTIFY_REDIRECT_URI);
+		startPolling();
+	} catch (e) {
+		showError('Couldn’t Connect', e.message || 'Tap "Connect to Spotify" again to retry.');
+	}
+}
+
+// --- Polling / now playing ---
+
+function formatTime(ms) {
+	const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+	const m = Math.floor(totalSec / 60);
+	const s = totalSec % 60;
+	return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function startPolling() {
+	if (pollTimer) clearInterval(pollTimer);
+	const intervalSec = clampRange(getIcueProperty('pollIntervalSec'), 2, 10, 3);
+	pollNow();
+	pollTimer = setInterval(pollNow, intervalSec * 1000);
+}
+
+async function pollNow() {
+	const clientId = getIcueProperty('spotifyClientId');
+	if (!clientId) return;
+
+	const accessToken = await SpotifyAuth.getValidAccessToken(clientId);
+	if (!accessToken) {
+		if (pollTimer) clearInterval(pollTimer);
+		showState('disconnected');
+		return;
+	}
+
+	try {
+		const data = await SpotifyApi.getCurrentlyPlaying(accessToken);
+		consecutiveErrors = 0;
+
+		if (!data || !data.item) {
+			currentTrack = null;
+			showState('empty');
+			return;
+		}
+
+		await updateTrackUI(data, accessToken);
+		showState('content');
+	} catch (e) {
+		consecutiveErrors++;
+		// Tolerate transient blips (rate limiting, brief network issues) by keeping the
+		// last known content on screen. Only surface an error after repeated failures.
+		if (consecutiveErrors >= 3 || !currentTrack) {
+			showError('Connection Issue', e.message || 'Could not reach Spotify.');
+		}
+	}
+}
+
+async function updateTrackUI(data, accessToken) {
+	const item = data.item;
+	const isNewTrack = !currentTrack || currentTrack.id !== item.id;
+
+	currentTrack = {
+		id: item.id,
+		uri: item.uri,
+		name: item.name,
+		artist: (item.artists || []).map(function (a) { return a.name; }).join(', '),
+		imageUrl: item.album && item.album.images && item.album.images[0] ? item.album.images[0].url : '',
+		durationMs: item.duration_ms,
+		progressMs: data.progress_ms || 0,
+		isPlaying: !!data.is_playing
+	};
+
+	document.getElementById('trackName').textContent = currentTrack.name;
+	document.getElementById('trackArtist').textContent = currentTrack.artist;
+	const art = document.getElementById('albumArt');
+	if (art.src !== currentTrack.imageUrl) art.src = currentTrack.imageUrl;
+
+	document.getElementById('timeElapsed').textContent = formatTime(currentTrack.progressMs);
+	document.getElementById('timeTotal').textContent = formatTime(currentTrack.durationMs);
+	const pct = currentTrack.durationMs ? (currentTrack.progressMs / currentTrack.durationMs) * 100 : 0;
+	document.getElementById('progressFill').style.width = clampRange(pct, 0, 100, 0) + '%';
+
+	document.getElementById('playIcon').style.display = currentTrack.isPlaying ? 'none' : '';
+	document.getElementById('pauseIcon').style.display = currentTrack.isPlaying ? '' : 'none';
+
+	if (isNewTrack) {
+		likedState = null;
+		containmentState = {};
+		refreshLikedState(accessToken);
+		refreshPlaylistsAndContainment(accessToken);
+	}
+}
+
+// --- Playback controls ---
+
+async function withAccessToken(fn) {
+	const clientId = getIcueProperty('spotifyClientId');
+	if (!clientId) return;
+	const accessToken = await SpotifyAuth.getValidAccessToken(clientId);
+	if (!accessToken) { showState('disconnected'); return; }
+	try {
+		await fn(accessToken);
+	} catch (e) {
+		console.error(e);
+	}
+}
+
+function wirePlaybackControls() {
+	document.getElementById('playPauseBtn').addEventListener('click', function () {
+		withAccessToken(async function (accessToken) {
+			if (currentTrack && currentTrack.isPlaying) {
+				await SpotifyApi.pause(accessToken);
+			} else {
+				await SpotifyApi.play(accessToken);
+			}
+			setTimeout(pollNow, 300);
+		});
+	});
+
+	document.getElementById('nextBtn').addEventListener('click', function () {
+		withAccessToken(async function (accessToken) {
+			await SpotifyApi.next(accessToken);
+			setTimeout(pollNow, 300);
+		});
+	});
+
+	document.getElementById('prevBtn').addEventListener('click', function () {
+		withAccessToken(async function (accessToken) {
+			await SpotifyApi.previous(accessToken);
+			setTimeout(pollNow, 300);
+		});
+	});
+
+	document.getElementById('likeBtn').addEventListener('click', function () {
+		if (!currentTrack) return;
+		const likeBtn = document.getElementById('likeBtn');
+		const nextLiked = !likedState;
+		withAccessToken(async function (accessToken) {
+			try {
+				await SpotifyApi.setTrackLiked(accessToken, currentTrack.id, nextLiked);
+				likedState = nextLiked;
+				likeBtn.classList.toggle('is-liked', likedState);
+			} catch (e) {
+				console.error('Failed to update Liked Songs:', e);
+			}
+		});
+	});
+
+	document.getElementById('connectBtn').addEventListener('click', handleConnectClick);
+}
+
+async function refreshLikedState(accessToken) {
+	if (!currentTrack) return;
+	const trackId = currentTrack.id;
+	try {
+		const liked = await SpotifyApi.isTrackLiked(accessToken, trackId);
+		if (!currentTrack || currentTrack.id !== trackId) return; // track changed mid-flight
+		likedState = liked;
+		document.getElementById('likeBtn').classList.toggle('is-liked', likedState);
+	} catch (e) {
+		console.error('Failed to read Liked Songs state:', e);
+	}
+}
+
+// --- Playlists panel ---
+
+async function refreshPlaylistsAndContainment(accessToken) {
+	const now = Date.now();
+	if (!playlistsCache || now - playlistsCacheAt > PLAYLISTS_CACHE_MS) {
+		try {
+			playlistsCache = await SpotifyApi.getAllPlaylists(accessToken);
+			playlistsCacheAt = now;
+		} catch (e) {
+			console.error('Failed to load playlists:', e);
+			return;
+		}
+	}
+
+	renderPlaylists();
+	checkContainmentForCurrentTrack(accessToken);
+}
+
+function renderPlaylists() {
+	const list = document.getElementById('playlistsList');
+	list.innerHTML = '';
+	if (!playlistsCache) return;
+
+	playlistsCache.forEach(function (playlist) {
+		const row = document.createElement('div');
+		row.className = 'playlist-row';
+		row.dataset.playlistId = playlist.id;
+
+		const member = containmentState[playlist.id];
+		row.classList.toggle('is-member', member === true);
+		row.classList.toggle('is-checking', member === 'checking');
+
+		const name = document.createElement('div');
+		name.className = 'playlist-name';
+		name.textContent = playlist.name;
+
+		const check = document.createElement('div');
+		check.className = 'playlist-check';
+		check.innerHTML = member === 'checking'
+			? '<div class="mini-spinner"></div>'
+			: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
+
+		row.appendChild(name);
+		row.appendChild(check);
+		row.addEventListener('click', function () { togglePlaylistMembership(playlist.id); });
+		list.appendChild(row);
+	});
+}
+
+async function checkContainmentForCurrentTrack(accessToken) {
+	if (!currentTrack || !playlistsCache) return;
+	const trackUri = currentTrack.uri;
+	const trackId = currentTrack.id;
+
+	playlistsCache.forEach(function (p) { containmentState[p.id] = 'checking'; });
+	renderPlaylists();
+
+	let index = 0;
+	async function worker() {
+		while (index < playlistsCache.length) {
+			const playlist = playlistsCache[index++];
+			try {
+				const contains = await SpotifyApi.playlistContainsTrack(accessToken, playlist.id, trackUri);
+				if (!currentTrack || currentTrack.id !== trackId) return; // track changed mid-flight
+				containmentState[playlist.id] = contains;
+			} catch (e) {
+				if (!currentTrack || currentTrack.id !== trackId) return;
+				containmentState[playlist.id] = false;
+			}
+			renderPlaylists();
+		}
+	}
+
+	const workers = [];
+	for (let i = 0; i < CONTAINMENT_CONCURRENCY; i++) workers.push(worker());
+	await Promise.all(workers);
+}
+
+async function togglePlaylistMembership(playlistId) {
+	if (!currentTrack) return;
+	const trackId = currentTrack.id;
+	const trackUri = currentTrack.uri;
+	const wasMember = containmentState[playlistId] === true;
+
+	containmentState[playlistId] = !wasMember;
+	renderPlaylists();
+
+	withAccessToken(async function (accessToken) {
+		try {
+			if (wasMember) {
+				await SpotifyApi.removeTrackFromPlaylist(accessToken, playlistId, trackUri);
+			} else {
+				await SpotifyApi.addTrackToPlaylist(accessToken, playlistId, trackUri);
+			}
+		} catch (e) {
+			console.error('Failed to update playlist:', e);
+			if (currentTrack && currentTrack.id === trackId) {
+				containmentState[playlistId] = wasMember;
+				renderPlaylists();
+			}
+		}
+	});
+}
+
+// --- Lifecycle ---
+
+function onIcueDataUpdated() {
+	applyStyles();
+	checkAuthCodeChanged();
+
+	const clientId = getIcueProperty('spotifyClientId');
+	if (!pollTimer && clientId && SpotifyAuth.isConnected()) {
+		startPolling();
+	} else if (!clientId && !SpotifyAuth.isConnected()) {
+		showState('disconnected');
+	}
+}
+
+function onIcueInitialized() {
+	applyStyles();
+	wirePlaybackControls();
+
+	// Seed with whatever is already sitting in the field (e.g. a code pasted in a
+	// previous session, already consumed) so we only react to a genuinely new paste
+	// going forward — authorization codes are single-use and a stale one would just
+	// fail. See README for the full connect flow.
+	lastSeenAuthCode = getIcueProperty('spotifyAuthCode') || '';
+
+	if (SpotifyAuth.isConnected()) {
+		startPolling();
+	} else {
+		showState('disconnected');
+	}
+}
+
+// iCUE API binding — bare assignment is intentional, see references/lifecycle-and-plugins.md
+icueEvents = {
+	onDataUpdated: onIcueDataUpdated,
+	onICUEInitialized: onIcueInitialized
+};
+
+var bootAttempts = 0, BOOT_RETRY_MS = 100, BOOT_RETRY_MAX = 15;
+function bootCheck() {
+	if (typeof iCUE_initialized !== 'undefined' && iCUE_initialized) { onIcueInitialized(); return; }
+	if (bootAttempts < BOOT_RETRY_MAX) { bootAttempts++; setTimeout(bootCheck, BOOT_RETRY_MS); return; }
+	onIcueInitialized(); // plain-browser fallback for local development
+}
+bootCheck();
