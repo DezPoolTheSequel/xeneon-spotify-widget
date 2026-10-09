@@ -42,6 +42,15 @@ a track is a single tap.
 
 ### 2. Install the widget
 
+Download `spotify-now-playing.icuewidget` from the
+[latest release](https://github.com/DezPoolTheSequel/xeneon-spotify-widget/releases/latest).
+
+In iCUE, go to the Widgets panel → **+** → select the downloaded `.icuewidget` file, and
+add it to your XENEON EDGE at whatever size you like.
+
+<details>
+<summary>Building from source instead</summary>
+
 ```sh
 git clone https://github.com/DezPoolTheSequel/xeneon-spotify-widget.git
 cd xeneon-spotify-widget
@@ -50,8 +59,8 @@ icuewidget validate .
 icuewidget package .
 ```
 
-In iCUE, go to the Widgets panel → **+** → select the generated `.icuewidget` file, and
-add it to your XENEON EDGE at whatever size you like.
+This produces the same `.icuewidget` file at the repo root.
+</details>
 
 ### 3. Connect your Spotify account
 
