@@ -12,23 +12,30 @@ const SpotifyApi = (function () {
 		}
 	}
 
-	// Shared circuit breaker across every call this module makes — including the
-	// regular "currently playing" poll, not just playlist actions. Cross-origin
-	// fetch() responses only expose a small safelist of headers to JavaScript, and
-	// Retry-After generally isn't one of them unless the server opts in via
+	// Circuit breaker, scoped per endpoint category rather than shared globally.
+	// Observed behavior: the player endpoints (currently-playing, play/pause/skip,
+	// Liked Songs) keep working reliably even while /me/playlists and playlist-track
+	// endpoints get rate-limited — Spotify appears to apply a separate, stricter
+	// quota to the playlists endpoints specifically (likely because playlist
+	// export/scraping is a common abuse pattern there). A single shared breaker was
+	// pausing the background now-playing poll too whenever only playlists were
+	// blocked, which dropped the whole display into a scary "Connection Issue"
+	// state over a problem that was never in the player endpoints. Cross-origin
+	// fetch() responses also only expose a small safelist of headers to JavaScript,
+	// and Retry-After generally isn't one of them unless the server opts in via
 	// Access-Control-Expose-Headers, so the real wait time is often simply not
-	// readable here. Without this, the background poll (every few seconds) would
-	// keep hitting a blocked endpoint the entire time a human "waits it out",
-	// which can prevent a sustained block from ever actually clearing.
+	// readable here — hence the fallback cooldown.
 	const RATE_LIMIT_FALLBACK_COOLDOWN_MS = 60 * 1000;
-	let rateLimitedUntil = 0;
+	const rateLimitedUntilByCategory = { player: 0, playlists: 0 };
 
-	async function request(path, accessToken, options) {
+	async function request(path, accessToken, options, category) {
 		options = options || {};
+		category = category || 'player';
 
-		if (Date.now() < rateLimitedUntil) {
-			const waitSec = Math.ceil((rateLimitedUntil - Date.now()) / 1000);
-			throw new SpotifyApiError('Rate limited by Spotify — pausing requests for ' + waitSec + 's.', 429);
+		const until = rateLimitedUntilByCategory[category] || 0;
+		if (Date.now() < until) {
+			const waitSec = Math.ceil((until - Date.now()) / 1000);
+			throw new SpotifyApiError('Rate limited by Spotify — pausing ' + category + ' requests for ' + waitSec + 's.', 429);
 		}
 
 		const response = await fetch(BASE + path, {
@@ -45,9 +52,9 @@ const SpotifyApi = (function () {
 			const cooldownMs = (Number.isFinite(retryAfterSec) && retryAfterSec > 0)
 				? retryAfterSec * 1000
 				: RATE_LIMIT_FALLBACK_COOLDOWN_MS;
-			rateLimitedUntil = Date.now() + cooldownMs;
+			rateLimitedUntilByCategory[category] = Date.now() + cooldownMs;
 			throw new SpotifyApiError(
-				'Rate limited by Spotify — pausing all requests for ' + Math.ceil(cooldownMs / 1000) + 's.',
+				'Rate limited by Spotify — pausing ' + category + ' requests for ' + Math.ceil(cooldownMs / 1000) + 's.',
 				429
 			);
 		}
@@ -78,45 +85,48 @@ const SpotifyApi = (function () {
 	}
 
 	function play(accessToken) {
-		return request('/me/player/play', accessToken, { method: 'PUT' });
+		return request('/me/player/play', accessToken, { method: 'PUT' }, 'player');
 	}
 
 	function pause(accessToken) {
-		return request('/me/player/pause', accessToken, { method: 'PUT' });
+		return request('/me/player/pause', accessToken, { method: 'PUT' }, 'player');
 	}
 
 	function next(accessToken) {
-		return request('/me/player/next', accessToken, { method: 'POST' });
+		return request('/me/player/next', accessToken, { method: 'POST' }, 'player');
 	}
 
 	function previous(accessToken) {
-		return request('/me/player/previous', accessToken, { method: 'POST' });
+		return request('/me/player/previous', accessToken, { method: 'POST' }, 'player');
 	}
 
 	// --- Liked Songs ---
 
 	async function isTrackLiked(accessToken, trackId) {
-		const result = await request('/me/tracks/contains?ids=' + encodeURIComponent(trackId), accessToken);
+		const result = await request('/me/tracks/contains?ids=' + encodeURIComponent(trackId), accessToken, null, 'player');
 		return !!(result && result[0]);
 	}
 
 	function setTrackLiked(accessToken, trackId, liked) {
 		return request('/me/tracks?ids=' + encodeURIComponent(trackId), accessToken, {
 			method: liked ? 'PUT' : 'DELETE'
-		});
+		}, 'player');
 	}
 
 	function getCurrentUser(accessToken) {
-		return request('/me', accessToken);
+		return request('/me', accessToken, null, 'player');
 	}
 
 	// --- Playlists ---
+	// Tagged as a separate 'playlists' category — Spotify appears to rate-limit
+	// these endpoints independently and more strictly than the player endpoints
+	// above, so a block here shouldn't pause those.
 
 	async function getAllPlaylists(accessToken) {
 		const playlists = [];
 		let url = '/me/playlists?limit=50';
 		while (url) {
-			const page = await request(url, accessToken);
+			const page = await request(url, accessToken, null, 'playlists');
 			if (!page) break;
 			playlists.push.apply(playlists, page.items.filter(Boolean));
 			url = page.next ? page.next.replace(BASE, '') : null;
@@ -131,7 +141,7 @@ const SpotifyApi = (function () {
 		let url = '/playlists/' + encodeURIComponent(playlistId) +
 			'/tracks?fields=items(track(uri))%2Cnext&limit=100';
 		while (url) {
-			const page = await request(url, accessToken);
+			const page = await request(url, accessToken, null, 'playlists');
 			if (!page) break;
 			const found = page.items.some(function (item) {
 				return item && item.track && item.track.uri === trackUri;
@@ -146,14 +156,14 @@ const SpotifyApi = (function () {
 		return request('/playlists/' + encodeURIComponent(playlistId) + '/tracks', accessToken, {
 			method: 'POST',
 			body: { uris: [trackUri] }
-		});
+		}, 'playlists');
 	}
 
 	function removeTrackFromPlaylist(accessToken, playlistId, trackUri) {
 		return request('/playlists/' + encodeURIComponent(playlistId) + '/tracks', accessToken, {
 			method: 'DELETE',
 			body: { tracks: [{ uri: trackUri }] }
-		});
+		}, 'playlists');
 	}
 
 	return {
