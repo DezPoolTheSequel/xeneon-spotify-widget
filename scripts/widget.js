@@ -282,13 +282,23 @@ async function withAccessToken(fn) {
 
 function wirePlaybackControls() {
 	document.getElementById('playPauseBtn').addEventListener('click', function () {
+		if (!currentTrack) return;
+
+		// Flip the icon immediately instead of waiting for the next poll to confirm —
+		// Spotify's own playback state can take a second or two to propagate, which
+		// otherwise reads as a laggy button even though the music itself responds
+		// right away.
+		currentTrack.isPlaying = !currentTrack.isPlaying;
+		document.getElementById('playIcon').style.display = currentTrack.isPlaying ? 'none' : '';
+		document.getElementById('pauseIcon').style.display = currentTrack.isPlaying ? '' : 'none';
+
 		withAccessToken(async function (accessToken) {
-			if (currentTrack && currentTrack.isPlaying) {
-				await SpotifyApi.pause(accessToken);
-			} else {
+			if (currentTrack.isPlaying) {
 				await SpotifyApi.play(accessToken);
+			} else {
+				await SpotifyApi.pause(accessToken);
 			}
-			setTimeout(pollNow, 300);
+			setTimeout(pollNow, 600);
 		});
 	});
 
@@ -344,28 +354,40 @@ let playlistRowEls = {}; // playlistId -> row element, rebuilt whenever playlist
 async function refreshPlaylistsAndContainment(accessToken) {
 	const now = Date.now();
 	if (!playlistsCache || now - playlistsCacheAt > PLAYLISTS_CACHE_MS) {
+		let fetched;
 		try {
-			if (!currentUserId) {
-				const me = await SpotifyApi.getCurrentUser(accessToken);
-				currentUserId = me.id;
-			}
-
-			const fetched = await SpotifyApi.getAllPlaylists(accessToken);
-			fetched.forEach(function (p) {
-				// Spotify returns 403 if you try to add/remove tracks on a playlist you
-				// don't own and isn't marked collaborative — only those are editable here.
-				p.isEditable = !!(p.collaborative || (p.owner && p.owner.id === currentUserId));
-			});
-			fetched.sort(function (a, b) {
-				return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
-			});
-			playlistsCache = fetched;
-			playlistsCacheAt = now;
-			renderPlaylistsList();
+			fetched = await SpotifyApi.getAllPlaylists(accessToken);
 		} catch (e) {
 			showToast('Couldn’t load playlists: ' + (e.message || e));
 			return;
 		}
+
+		// Best-effort only — the playlist list must still render even if this fails,
+		// just without ownership info yet (isEditable defaults to true below, so a
+		// row simply behaves as it did before ownership checks existed until this
+		// succeeds on a later refresh).
+		if (!currentUserId) {
+			try {
+				const me = await SpotifyApi.getCurrentUser(accessToken);
+				currentUserId = me.id;
+			} catch (e) {
+				console.error('Failed to read current Spotify user:', e);
+			}
+		}
+
+		fetched.forEach(function (p) {
+			// Spotify returns 403 if you try to add/remove tracks on a playlist you
+			// don't own and isn't marked collaborative — only those are editable here.
+			p.isEditable = currentUserId
+				? !!(p.collaborative || (p.owner && p.owner.id === currentUserId))
+				: true;
+		});
+		fetched.sort(function (a, b) {
+			return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+		});
+		playlistsCache = fetched;
+		playlistsCacheAt = now;
+		renderPlaylistsList();
 	}
 
 	checkContainmentForCurrentTrack(accessToken);

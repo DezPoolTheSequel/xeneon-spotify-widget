@@ -8,21 +8,19 @@
 	--radius-card: 10px;
 	--radius-art: 8px;
 
-	/* The player (art + track info + controls) is a fixed, constant size whenever the
-	   playlist panel is also shown (M/L/XL) — only the playlist panel grows to use
-	   extra space there. At Small, where there's no playlist panel to share space
-	   with, these are overridden larger to fill the slot (see the max-height:450px
-	   block below). These are plain px, not vmin: this widget only ever renders at
-	   8 known Xeneon Edge resolutions, so there's no need for viewport-relative
+	/* The player (art + track info + controls) is one fixed, constant size at every
+	   slot size, S through XL — only the playlist panel grows or shrinks to use
+	   whatever space is left over. Plain px, not vmin: this widget only ever renders
+	   at 8 known Xeneon Edge resolutions, so there's no need for viewport-relative
 	   scaling here. */
-	--art-size: 110px;
-	--font-track: 20px;
-	--font-artist: 14px;
-	--font-label: 12px;
+	--art-size: 260px;
+	--font-track: 32px;
+	--font-artist: 20px;
+	--font-label: 15px;
 	--font-title: 18px;
 	--font-body: 16px;
-	--ctrl-size: 38px;
-	--ctrl-icon: 17px;
+	--ctrl-size: 62px;
+	--ctrl-icon: 27px;
 }
 
 html {
@@ -167,7 +165,7 @@ body {
 	display: flex;
 	flex-direction: row;
 	align-items: center;
-	gap: 14px;
+	gap: 24px;
 	flex: 0 0 auto;
 }
 
@@ -192,8 +190,10 @@ body {
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
-	gap: 8px;
-	width: 240px;
+	gap: 14px;
+	width: auto;
+	flex: 1 1 auto;
+	max-width: 340px;
 	min-width: 0;
 }
 
@@ -232,7 +232,7 @@ body {
 
 .progress-track {
 	flex: 1 1 auto;
-	height: 4px;
+	height: 6px;
 	border-radius: 999px;
 	background: rgba(255, 255, 255, 0.2);
 	overflow: hidden;
@@ -401,35 +401,13 @@ body {
 	.player-area { align-self: center; }
 }
 
-/* Medium/Large/Extra Large only: show the playlist panel. Height is the reliable
-   discriminator for Small — S-H and L-H have nearly identical aspect ratios, but
-   every M/L/XL slot (H or V) is 696px+ tall while both S slots are under 420px. */
+/* Medium/Large/Extra Large only: show the playlist panel (Small has no room for it —
+   the player is a fixed size everywhere, so Small just shows the player alone).
+   Height is the reliable discriminator — S-H and L-H have nearly identical aspect
+   ratios, but every M/L/XL slot (H or V) is 696px+ tall while both S slots are
+   under 420px. */
 @media (min-height: 451px) {
 	.playlists-area { display: flex; }
-}
-
-/* Small (S-H 840x344, S-V 696x416): no playlist panel to share space with, so the
-   player scales up to fill the slot instead of staying at the M/L/XL compact size. */
-@media (max-height: 450px) {
-	:root {
-		--art-size: 260px;
-		--font-track: 32px;
-		--font-artist: 20px;
-		--font-label: 15px;
-		--ctrl-size: 62px;
-		--ctrl-icon: 27px;
-	}
-
-	.player-area { gap: 24px; }
-
-	.player-details {
-		width: auto;
-		flex: 1 1 auto;
-		max-width: 420px;
-		gap: 14px;
-	}
-
-	.progress-track { height: 6px; }
 }
 
 /* ---------- Toast (diagnostic error messages) ---------- */
