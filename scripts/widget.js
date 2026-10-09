@@ -3,7 +3,8 @@
 const SPOTIFY_REDIRECT_URI = 'https://dezpoolthesequel.github.io/xeneon-spotify-widget/callback.html';
 
 const PLAYLISTS_CACHE_MS = 5 * 60 * 1000;
-const CONTAINMENT_CONCURRENCY = 3;
+const CONTAINMENT_CONCURRENCY = 2;
+const CONTAINMENT_STAGGER_MS = 120;
 
 let lastSeenAuthCode = '';
 let pollTimer = null;
@@ -280,9 +281,18 @@ async function withAccessToken(fn) {
 	}
 }
 
+let playPauseCooldownUntil = 0;
+
 function wirePlaybackControls() {
 	document.getElementById('playPauseBtn').addEventListener('click', function () {
 		if (!currentTrack) return;
+
+		// Backstop against any duplicate/rapid-fire click event (touchscreens can
+		// synthesize more than one) — a genuine second tap this fast would just be
+		// ignored, which is fine for a play/pause button.
+		const now = Date.now();
+		if (now < playPauseCooldownUntil) return;
+		playPauseCooldownUntil = now + 500;
 
 		// Flip the icon immediately instead of waiting for the next poll to confirm —
 		// Spotify's own playback state can take a second or two to propagate, which
@@ -470,6 +480,12 @@ async function checkContainmentForCurrentTrack(accessToken) {
 				if (!firstError) firstError = e;
 			}
 			updatePlaylistRowUI(playlist.id);
+
+			// Small stagger between requests so a large playlist library doesn't burst
+			// the whole sweep at once and trip Spotify's rate limit.
+			if (index < playlistsCache.length) {
+				await new Promise(function (resolve) { setTimeout(resolve, CONTAINMENT_STAGGER_MS); });
+			}
 		}
 	}
 
@@ -522,7 +538,15 @@ function onIcueDataUpdated() {
 	}
 }
 
+let hasInitialized = false;
 function onIcueInitialized() {
+	// Both this module's own boot-retry loop and iCUE's own callback invocation can
+	// end up calling this — guard so wirePlaybackControls() (and its click listeners)
+	// never gets attached twice, which otherwise fires every button's handler twice
+	// per tap (e.g. play/pause flipping state forward then immediately back).
+	if (hasInitialized) return;
+	hasInitialized = true;
+
 	applyStyles();
 	wirePlaybackControls();
 

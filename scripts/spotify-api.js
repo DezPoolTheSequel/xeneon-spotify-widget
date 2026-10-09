@@ -12,8 +12,10 @@ const SpotifyApi = (function () {
 		}
 	}
 
-	async function request(path, accessToken, options) {
+	async function request(path, accessToken, options, retriesLeft) {
 		options = options || {};
+		if (retriesLeft === undefined) retriesLeft = 3;
+
 		const response = await fetch(BASE + path, {
 			method: options.method || 'GET',
 			headers: Object.assign(
@@ -22,6 +24,16 @@ const SpotifyApi = (function () {
 			),
 			body: options.body ? JSON.stringify(options.body) : undefined
 		});
+
+		// Spotify's rate limit is a rolling window — checking many playlists at once
+		// (containment checks) can trip it. Respect Retry-After and retry instead of
+		// failing immediately; this also means a user-initiated add/remove tap that
+		// gets rate-limited waits and succeeds rather than erroring right away.
+		if (response.status === 429 && retriesLeft > 0) {
+			const retryAfterSec = Number(response.headers.get('Retry-After')) || 1;
+			await new Promise(function (resolve) { setTimeout(resolve, retryAfterSec * 1000); });
+			return request(path, accessToken, options, retriesLeft - 1);
+		}
 
 		if (response.status === 204 || response.status === 202) return null;
 
