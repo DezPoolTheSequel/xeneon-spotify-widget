@@ -2,7 +2,7 @@
 // repo's GitHub Pages site. See README.md for setup.
 const SPOTIFY_REDIRECT_URI = 'https://dezpoolthesequel.github.io/xeneon-spotify-widget/callback.html';
 
-const PLAYLISTS_CACHE_MS = 5 * 60 * 1000;
+const PLAYLISTS_CACHE_MS = 30 * 60 * 1000;
 const CONTAINMENT_CONCURRENCY = 2;
 const CONTAINMENT_STAGGER_MS = 120;
 
@@ -369,21 +369,25 @@ async function refreshLikedState(accessToken) {
 // library — which is what keeps this from re-tripping Spotify's rate limit the
 // way eagerly checking every playlist on every track change did.
 
-const PLAYLIST_SEARCH_DEBOUNCE_MS = 150;
 const PLAYLIST_RESULTS_LIMIT = 12;
 
 let playlistRowEls = {}; // playlistId -> row element, for the currently rendered search results
 let playlistSearchQuery = '';
-let playlistSearchDebounceTimer = null;
 
 function wirePlaylistSearch() {
 	const input = document.getElementById('playlistSearch');
-	input.addEventListener('input', function () {
+
+	// Search fires on Enter, not on every keystroke — fewer requests overall, and
+	// more predictable than filtering live against an API that can be rate-limited.
+	input.addEventListener('keydown', function (ev) {
+		if (ev.key !== 'Enter') return;
 		const query = input.value;
-		if (playlistSearchDebounceTimer) clearTimeout(playlistSearchDebounceTimer);
-		playlistSearchDebounceTimer = setTimeout(function () {
-			withAccessToken(function (accessToken) { return performPlaylistSearch(accessToken, query); });
-		}, PLAYLIST_SEARCH_DEBOUNCE_MS);
+		withAccessToken(function (accessToken) { return performPlaylistSearch(accessToken, query); });
+	});
+
+	// Clearing the box resets the view immediately without waiting for Enter.
+	input.addEventListener('input', function () {
+		if (!input.value.trim()) performPlaylistSearch(null, '');
 	});
 }
 
@@ -426,7 +430,7 @@ async function performPlaylistSearch(accessToken, query) {
 	if (!query.trim()) {
 		document.getElementById('playlistsList').innerHTML = '';
 		playlistRowEls = {};
-		hint.textContent = 'Type to search your playlists';
+		hint.textContent = 'Type a playlist name and press Enter';
 		hint.style.display = '';
 		return;
 	}
